@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: liucheng-cv-agent
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: DEEPSEEK_BASE_URL
+        value: https://api.deepseek.com/v1
+      - key: DEEPSEEK_MODEL_CHAT
+        value: deepseek-chat

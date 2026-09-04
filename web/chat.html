@@ -64,7 +64,7 @@
 <main>
   <header><span class="dot"></span><h1>就"刘城是谁"随便问——他干过什么、怎么干的、数字是不是真的</h1></header>
   <div id="chat">
-    <div class="msg agent" id="welcome">👋 我是基于刘城简历 + 口述话术库构建的问答 Agent。每次回答尽量带真实引用来源；材料覆盖不足的问题，我会给出边界口径，并建议联系刘城确认细节。试试上方示例问题，或随便提问。</div>
+    <div class="msg agent" id="welcome">我是刘城问答 Agent。每次回答尽量带真实引用来源；材料覆盖不足的问题，我会给出边界口径，并建议联系刘城确认细节。试试上方示例问题，或随便提问。</div>
   </div>
   <div id="chips"></div>
   <div id="inputbar">
@@ -75,7 +75,9 @@
 <script>
 const CHIPS = ["简单介绍下刘城", "设备运维 RAG 系统的检索链路怎么设计的？",
   "质量分析报告助手解决什么问题？", "停机时长从 3000 降到 600 怎么做到的？",
-  "他做过前端吗？", "为什么从 Dify 迁到自研？", "他擅长什么、不擅长什么？", "他的职业规划？"];
+  "商品宣传图自动出图 Agent 你具体怎么做的？", "智能视频生成平台为什么要用多 Agent？",
+  "视频项目分镜 JSON 为什么重要？", "为什么从 Dify 迁到自研？",
+  "他做过前端吗？", "他擅长什么、不擅长什么？", "他的职业规划？"];
 const $chat = document.getElementById('chat'), $in = document.getElementById('input'),
       $send = document.getElementById('send'), $chips = document.getElementById('chips');
 let busy = false, history = [];
