@@ -50,7 +50,8 @@ def load_kb() -> list[Chunk]:
         level = FILE_LEVEL.get(prefix, "L1")
         if level == "META":
             continue  # 校对清单等过程文档不进知识库
-        show_name = fname.split("_", 1)[-1].replace(".md", "")
+        # 引用来源展示完整文件名，避免知识库编号（如 008/009）和前端来源不一致。
+        show_name = fname
         text = path.read_text(encoding="utf-8")
         # 按标题切块：每个标题(及紧随的正文)自成一块
         parts = []

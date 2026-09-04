@@ -33,9 +33,9 @@
                border-bottom-left-radius: 3px; }
   .msg b { font-weight: 600; }
   .src { margin-top:8px; font-size:12px; color:#6b7280; border-top:1px dashed #d1d5db; padding-top:6px; }
-  .src details { margin-top:4px; }
-  .src summary { cursor:pointer; color:#2563eb; }
-  .src ul { padding-left:16px; margin-top:4px; }
+  .src .src-title { color:#2563eb; font-weight:600; margin-bottom:4px; }
+  .src ol { padding-left:18px; margin-top:4px; }
+  .src li { margin:2px 0; }
   .fallback { background:#fffbeb !important; border-color:#fcd34d !important; }
   #chips { padding: 10px 22px 6px; display: flex; flex-wrap: wrap; gap: 8px; }
   #chips button { border:1px solid #d1d5db; background:#fff; border-radius:999px;
@@ -122,16 +122,24 @@ function renderSources(el, ev){
   const modeTag = ev.mode==='fallback' ? '（材料覆盖不足 → 边界兜底）'
                : ev.mode==='weak' ? '（依据有限，建议确认）' : '';
   el.classList.add(...(ev.mode==='fallback' ? ['fallback'] : []));
-  if (ev.items && ev.items.length){
-    const s = document.createElement('div'); s.className='src';
-    const list = ev.items.map(i => `<li>${esc(i.file)} § ${esc(i.section)}</li>`).join('');
-    s.innerHTML = `📎 证据来源 ${modeTag}<details><summary>展开查看引用</summary><ul>${list}</ul></details>`;
-    el.appendChild(s);
-  } else {
-    const s = document.createElement('div'); s.className='src';
-    s.textContent = 'ℹ️ 该回答未引用知识库内容，未生成来源。' + modeTag;
-    el.appendChild(s);
+  if (el.textContent.includes('引用来源：')) {
+    $chat.scrollTop = $chat.scrollHeight;
+    return;
   }
+  const s = document.createElement('div'); s.className='src';
+  if (ev.items && ev.items.length){
+    const unique = [];
+    const seen = new Set();
+    ev.items.forEach(i => {
+      const key = `${i.file}§${i.section}`;
+      if (!seen.has(key)){ seen.add(key); unique.push(i); }
+    });
+    const list = unique.map(i => `<li>${esc(i.file)} § ${esc(i.section)}</li>`).join('');
+    s.innerHTML = `<div class="src-title">引用来源 ${modeTag}</div><ol>${list}</ol>`;
+  } else {
+    s.innerHTML = `<div class="src-title">引用来源 ${modeTag}</div><div>暂无明确知识库来源，建议联系刘城确认细节。</div>`;
+  }
+  el.appendChild(s);
   $chat.scrollTop = $chat.scrollHeight;
 }
 $send.onclick = () => { const q = $in.value; $in.value=''; ask(q); };

@@ -32,6 +32,20 @@ FALLBACK = CFG.fallback_msg + "。你也可以换个问法，围绕项目经历�
 WEAK_NOTE = "\n\n（当前检索资料覆盖有限，细节口径建议联系刘城本人确认）"
 
 
+def _format_citations(evid: list[tuple[Chunk, float, float]]) -> str:
+    seen = set()
+    lines = []
+    for c, _, _ in evid:
+        key = (c.file, c.section)
+        if key in seen:
+            continue
+        seen.add(key)
+        lines.append(f"{len(lines) + 1}. {c.file} § {c.section}")
+    if not lines:
+        return "\n\n引用来源：暂无明确知识库来源，建议联系刘城确认细节。"
+    return "\n\n引用来源：\n" + "\n".join(lines)
+
+
 def _build_context(top: list[tuple[Chunk, float, float]]) -> str:
     blocks, total = [], 0
     for c, _, _ in top:
@@ -70,7 +84,7 @@ async def chat_stream(question: str, history: list[dict]) -> AsyncGenerator[dict
     mode, evid, reason = route(question)
     if mode == "fallback":
         # 兜底模板直返（不调用 LLM），避免在低证据场景编造经历
-        for ch in FALLBACK:
+        for ch in FALLBACK + _format_citations([]):
             yield {"type": "token", "text": ch}
             await asyncio.sleep(0)
         yield {"type": "sources", "items": [], "mode": "fallback", "reason": reason}
@@ -103,6 +117,9 @@ async def chat_stream(question: str, history: list[dict]) -> AsyncGenerator[dict
         for ch in WEAK_NOTE:
             yield {"type": "token", "text": ch}
             await asyncio.sleep(0)
+    for ch in _format_citations(evid):
+        yield {"type": "token", "text": ch}
+        await asyncio.sleep(0)
     yield {
         "type": "sources",
         "items": [{"file": c.file, "section": c.section} for c, _, _ in evid],
