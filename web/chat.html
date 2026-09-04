@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>刘城 · CV-Agent 简历智能问答</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+         background: #f3f5f9; color: #1f2937; display: flex; height: 100vh; }
+  /* 左栏 */
+  aside { width: 260px; background: #fff; border-right: 1px solid #e5e7eb;
+          display: flex; flex-direction: column; padding: 20px 16px; gap: 10px; }
+  aside .logo { font-size: 20px; font-weight: 700; }
+  aside .logo span { color: #2563eb; }
+  aside .sub { font-size: 12px; color: #6b7280; line-height: 1.6; }
+  aside .tag { background:#eff6ff; color:#1d4ed8; border-radius:6px; padding:2px 8px;
+               font-size: 11px; align-self:flex-start; }
+  aside ul { list-style: none; font-size: 12px; color:#374151; }
+  aside ul li { padding: 4px 0; border-bottom: 1px dashed #eee; }
+  aside .foot { margin-top: auto; font-size: 11px; color:#9ca3af; }
+  /* 主区 */
+  main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  header { padding: 14px 22px; background:#fff; border-bottom:1px solid #e5e7eb;
+           display:flex; align-items:center; gap:10px; }
+  header h1 { font-size: 16px; }
+  header .dot { width:8px; height:8px; border-radius:50%; background:#22c55e; }
+  #chat { flex:1; overflow-y:auto; padding: 22px; display:flex; flex-direction:column; gap:14px; }
+  .msg { max-width: 78%; padding: 10px 14px; border-radius: 12px; white-space: pre-wrap;
+         word-break: break-word; font-size: 14px; line-height: 1.7; }
+  .msg.user { align-self: flex-end; background: #2563eb; color: #fff; border-bottom-right-radius: 3px; }
+  .msg.agent { align-self: flex-start; background: #fff; border:1px solid #e5e7eb;
+               border-bottom-left-radius: 3px; }
+  .msg b { font-weight: 600; }
+  .src { margin-top:8px; font-size:12px; color:#6b7280; border-top:1px dashed #d1d5db; padding-top:6px; }
+  .src details { margin-top:4px; }
+  .src summary { cursor:pointer; color:#2563eb; }
+  .src ul { padding-left:16px; margin-top:4px; }
+  .fallback { background:#fffbeb !important; border-color:#fcd34d !important; }
+  #chips { padding: 10px 22px 6px; display: flex; flex-wrap: wrap; gap: 8px; }
+  #chips button { border:1px solid #d1d5db; background:#fff; border-radius:999px;
+                  padding:6px 14px; font-size:13px; cursor:pointer; color:#374151; }
+  #chips button:hover { border-color:#2563eb; color:#2563eb; }
+  #inputbar { display:flex; gap:10px; padding: 12px 22px 18px; }
+  #input { flex:1; border:1px solid #d1d5db; border-radius:10px; padding:10px 14px;
+           font-size:14px; outline:none; font-family:inherit; }
+  #input:focus { border-color:#2563eb; }
+  #send { background:#2563eb; color:#fff; border:none; border-radius:10px; padding:0 20px;
+          cursor:pointer; font-size:14px; }
+  #send:disabled { opacity:.5; cursor:not-allowed; }
+  .typing::after { content:"▍"; animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  @media (max-width: 860px){ aside { display:none; } .msg { max-width:92%; } }
+</style>
+</head>
+<body>
+<aside>
+  <div class="logo">📄 刘城 <span>CV-Agent</span></div>
+  <span class="tag">简历智能问答 · 实时模式</span>
+  <div class="sub">把简历做成知识库：提问 → 检索 → 证据校验 → 生成/边界兜底。证据不足时给出稳妥口径并引导联系刘城确认。</div>
+  <ul id="kbstat"><li>知识库加载中…</li></ul>
+  <div class="foot">技术栈：FastAPI · SSE · DeepSeek API<br>检索：BM25 风格词重叠 + L0/L1 分层加权<br>© 2026 刘城</div>
+</aside>
+<main>
+  <header><span class="dot"></span><h1>就"刘城是谁"随便问——他干过什么、怎么干的、数字是不是真的</h1></header>
+  <div id="chat">
+    <div class="msg agent" id="welcome">👋 我是基于刘城简历 + 口述话术库构建的问答 Agent。每次回答尽量带真实引用来源；材料覆盖不足的问题，我会给出边界口径，并建议联系刘城确认细节。试试上方示例问题，或随便提问。</div>
+  </div>
+  <div id="chips"></div>
+  <div id="inputbar">
+    <input id="input" placeholder="输入问题，例如：讲讲设备运维 RAG 系统的混合检索" autocomplete="off">
+    <button id="send">发送</button>
+  </div>
+</main>
+<script>
+const CHIPS = ["简单介绍下刘城", "设备运维 RAG 系统的检索链路怎么设计的？",
+  "质量分析报告助手解决什么问题？", "停机时长从 3000 降到 600 怎么做到的？",
+  "他做过前端吗？", "为什么从 Dify 迁到自研？", "他擅长什么、不擅长什么？", "他的职业规划？"];
+const $chat = document.getElementById('chat'), $in = document.getElementById('input'),
+      $send = document.getElementById('send'), $chips = document.getElementById('chips');
+let busy = false, history = [];
+
+CHIPS.forEach(q => { const b = document.createElement('button'); b.textContent = q;
+  b.onclick = () => ask(q); $chips.appendChild(b); });
+
+function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function md(t){ // 最小 markdown：加粗 / 行间
+  let s = esc(t);
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+  return s; }
+function addMsg(role, html){ const d = document.createElement('div');
+  d.className = 'msg ' + role; d.innerHTML = html; $chat.appendChild(d); $chat.scrollTop = $chat.scrollHeight; return d; }
+
+async function ask(question){
+  if (busy || !question.trim()) return;
+  busy = true; $send.disabled = true; history.push({role:'user', content:question});
+  addMsg('user', md(question));
+  const agentEl = addMsg('agent', '<span class="typing"></span>');
+  const buf = [];
+  const resp = await fetch('/api/chat', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({question, history: history.slice(-4)}) });
+  const reader = resp.body.getReader(), dec = new TextDecoder();
+  let acc = '';
+  for(;;){ const {done, value} = await reader.read(); if (done) break;
+    acc += dec.decode(value, {stream:true});
+    let idx;
+    while((idx = acc.indexOf('\n\n')) >= 0){
+      const raw = acc.slice(0, idx); acc = acc.slice(idx+2);
+      if (!raw.startsWith('data: ')) continue;
+      const ev = JSON.parse(raw.slice(6));
+      if (ev.type === 'token'){ buf.push(ev.text); agentEl.innerHTML = md(buf.join('')) + '<span class="typing"></span>'; }
+      else if (ev.type === 'error'){ buf.length=0; buf.push('⚠️ '+ev.text); agentEl.innerHTML = md(buf.join('')); }
+      else if (ev.type === 'sources'){ renderSources(agentEl, ev); }
+    }
+  }
+  history.push({role:'assistant', content: buf.join('')});
+  busy = false; $send.disabled = false; $in.focus();
+}
+function renderSources(el, ev){
+  const modeTag = ev.mode==='fallback' ? '（材料覆盖不足 → 边界兜底）'
+               : ev.mode==='weak' ? '（依据有限，建议确认）' : '';
+  el.classList.add(...(ev.mode==='fallback' ? ['fallback'] : []));
+  if (ev.items && ev.items.length){
+    const s = document.createElement('div'); s.className='src';
+    const list = ev.items.map(i => `<li>${esc(i.file)} § ${esc(i.section)}</li>`).join('');
+    s.innerHTML = `📎 证据来源 ${modeTag}<details><summary>展开查看引用</summary><ul>${list}</ul></details>`;
+    el.appendChild(s);
+  } else {
+    const s = document.createElement('div'); s.className='src';
+    s.textContent = 'ℹ️ 该回答未引用知识库内容，未生成来源。' + modeTag;
+    el.appendChild(s);
+  }
+  $chat.scrollTop = $chat.scrollHeight;
+}
+$send.onclick = () => { const q = $in.value; $in.value=''; ask(q); };
+$in.addEventListener('keydown', e => { if (e.key === 'Enter'){ const q = $in.value; $in.value=''; ask(q); }});
+// 知识库状态
+fetch('/api/health').then(r => r.json()).then(()=>{}).catch(()=>{});
+</script>
+</body>
+</html>
