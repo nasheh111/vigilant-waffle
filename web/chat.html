@@ -64,7 +64,7 @@
 <main>
   <header><span class="dot"></span><h1>就"刘城是谁"随便问——他干过什么、怎么干的、数字是不是真的</h1></header>
   <div id="chat">
-    <div class="msg agent" id="welcome">我是刘城问答 Agent。每次回答尽量带真实引用来源；材料覆盖不足的问题，我会给出边界口径，并建议联系刘城确认细节。试试上方示例问题，或随便提问。</div>
+    <div class="msg agent" id="welcome">我是刘城问答 Agent。材料覆盖不足的问题，我会给出边界口径，并建议联系刘城确认细节。试试上方示例问题，或随便提问。</div>
   </div>
   <div id="chips"></div>
   <div id="inputbar">
@@ -119,27 +119,7 @@ async function ask(question){
   busy = false; $send.disabled = false; $in.focus();
 }
 function renderSources(el, ev){
-  const modeTag = ev.mode==='fallback' ? '（材料覆盖不足 → 边界兜底）'
-               : ev.mode==='weak' ? '（依据有限，建议确认）' : '';
   el.classList.add(...(ev.mode==='fallback' ? ['fallback'] : []));
-  if (el.textContent.includes('引用来源：')) {
-    $chat.scrollTop = $chat.scrollHeight;
-    return;
-  }
-  const s = document.createElement('div'); s.className='src';
-  if (ev.items && ev.items.length){
-    const unique = [];
-    const seen = new Set();
-    ev.items.forEach(i => {
-      const key = `${i.file}§${i.section}`;
-      if (!seen.has(key)){ seen.add(key); unique.push(i); }
-    });
-    const list = unique.map(i => `<li>${esc(i.file)} § ${esc(i.section)}</li>`).join('');
-    s.innerHTML = `<div class="src-title">引用来源 ${modeTag}</div><ol>${list}</ol>`;
-  } else {
-    s.innerHTML = `<div class="src-title">引用来源 ${modeTag}</div><div>暂无明确知识库来源，建议联系刘城确认细节。</div>`;
-  }
-  el.appendChild(s);
   $chat.scrollTop = $chat.scrollHeight;
 }
 $send.onclick = () => { const q = $in.value; $in.value=''; ask(q); };
