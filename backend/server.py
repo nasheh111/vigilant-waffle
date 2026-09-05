@@ -16,12 +16,12 @@ try:
     from .config import CFG
     from .chat import chat_stream, route
     from .kb import CHUNKS
-    from .question_store import count_questions, list_questions, save_question
+    from .question_store import count_questions, list_questions, save_answer, save_question
 except ImportError:  # 兼容在 backend 目录内直接运行脚本
     from config import CFG
     from chat import chat_stream, route
     from kb import CHUNKS
-    from question_store import count_questions, list_questions, save_question
+    from question_store import count_questions, list_questions, save_answer, save_question
 
 ROOT = Path(__file__).resolve().parent.parent
 app = FastAPI(title="CV-Agent 简历智能问答", version="0.1.0")
@@ -51,8 +51,9 @@ async def chat(body: ChatBody, request: Request):
     question = body.question.strip()
     if not question:
         return StreamingResponse(iter([_ev({"type": "error", "text": "问题为空。"})]), media_type="text/event-stream")
+    question_id = None
     try:
-        save_question(
+        question_id = save_question(
             question,
             request.client.host if request.client else "",
             request.headers.get("user-agent", ""),
@@ -61,8 +62,17 @@ async def chat(body: ChatBody, request: Request):
         pass
 
     async def gen():
-        async for item in chat_stream(question, body.history or []):
-            yield _ev(item)
+        answer_parts = []
+        try:
+            async for item in chat_stream(question, body.history or []):
+                if item.get("type") in {"token", "error"}:
+                    answer_parts.append(str(item.get("text", "")))
+                yield _ev(item)
+        finally:
+            try:
+                save_answer(question_id, "".join(answer_parts))
+            except Exception:
+                pass
 
     return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
@@ -103,13 +113,13 @@ body{{font-family:system-ui,"Microsoft YaHei",sans-serif;background:#f6f7fb;colo
 a,button{{font:inherit}} button{{padding:8px 12px;border:1px solid #d1d5db;background:#fff;border-radius:8px;cursor:pointer}}
 table{{width:100%;border-collapse:collapse;background:#fff;border:1px solid #e5e7eb}}
 th,td{{padding:10px;border-bottom:1px solid #e5e7eb;text-align:left;vertical-align:top;font-size:14px}}
-th{{background:#f9fafb}} td:nth-child(3){{white-space:pre-wrap;line-height:1.6}}
+th{{background:#f9fafb}} td:nth-child(3),td:nth-child(4){{white-space:pre-wrap;line-height:1.6}}
 .muted{{color:#6b7280;font-size:13px;line-height:1.6}} .status{{font-size:12px;color:#16a34a;margin-top:4px}}
-.empty{{text-align:center;color:#6b7280;padding:28px}}
+.empty{{text-align:center;color:#6b7280;padding:28px}} .pending{{color:#9ca3af}}
 </style></head><body><div class="wrap">
-<div class="bar"><div><h1>刘城问答 Agent 后台</h1><div class="muted">共 <span id="total">{count_questions()}</span> 条用户提问，时间为北京时间（Asia/Shanghai），最新提问置顶。</div><div class="status" id="status">正在读取最新记录...</div></div>
+<div class="bar"><div><h1>刘城问答 Agent 后台</h1><div class="muted">共 <span id="total">{count_questions()}</span> 条记录，时间为北京时间（Asia/Shanghai），最新提问置顶，问题和模型回复都会归档。</div><div class="status" id="status">正在读取最新记录...</div></div>
 <form method="post" action="/admin/logout"><button>退出</button></form></div>
-<table><thead><tr><th>ID</th><th>北京时间</th><th>用户提问</th><th>IP</th></tr></thead><tbody id="rows"><tr><td class="empty" colspan="4">正在加载...</td></tr></tbody></table>
+<table><thead><tr><th>ID</th><th>提问时间</th><th>用户提问</th><th>模型回复</th><th>回复时间</th><th>IP</th></tr></thead><tbody id="rows"><tr><td class="empty" colspan="6">正在加载...</td></tr></tbody></table>
 <script>
 const rowsEl = document.getElementById('rows');
 const totalEl = document.getElementById('total');
@@ -117,11 +127,11 @@ const statusEl = document.getElementById('status');
 function esc(s){{return String(s ?? '').replace(/[&<>"']/g, c=>({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[c]));}}
 function renderRows(items){{
   if(!items.length){{
-    rowsEl.innerHTML = '<tr><td class="empty" colspan="4">还没有用户提问</td></tr>';
+    rowsEl.innerHTML = '<tr><td class="empty" colspan="6">还没有用户提问</td></tr>';
     return;
   }}
   rowsEl.innerHTML = items.map(r =>
-    `<tr><td>${{esc(r.id)}}</td><td>${{esc(r.created_at)}}</td><td>${{esc(r.question)}}</td><td>${{esc(r.ip)}}</td></tr>`
+    `<tr><td>${{esc(r.id)}}</td><td>${{esc(r.created_at)}}</td><td>${{esc(r.question)}}</td><td>${{r.answer ? esc(r.answer) : '<span class="pending">回复生成中...</span>'}}</td><td>${{esc(r.answered_at || '')}}</td><td>${{esc(r.ip)}}</td></tr>`
   ).join('');
 }}
 async function loadQuestions(){{
