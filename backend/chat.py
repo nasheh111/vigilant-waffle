@@ -4,6 +4,7 @@
 链路映射自简历方法论：混合检索 → 证据校验(阈值) → 生成/兜底
 """
 import asyncio
+import re
 from typing import AsyncGenerator
 
 from openai import AsyncOpenAI
@@ -15,7 +16,7 @@ except ImportError:  # 兼容在 backend 目录内直接运行脚本
     from config import CFG
     from kb import Chunk, retrieve
 
-_client = AsyncOpenAI(api_key=CFG.deepseek_api_key, base_url=CFG.deepseek_base_url)
+_client = AsyncOpenAI(api_key=CFG.deepseek_api_key, base_url=CFG.deepseek_base_url) if CFG.deepseek_api_key else None
 
 SYSTEM_PROMPT = """你是"刘城简历问答助手"，服务 HR/面试官/求职同行。你只能依据【证据】回答关于刘城（大模型应用工程师）的问题。
 
@@ -30,6 +31,42 @@ SYSTEM_PROMPT = """你是"刘城简历问答助手"，服务 HR/面试官/求职
 FALLBACK = CFG.fallback_msg + "。你也可以换个问法，围绕项目经历、RAG 链路、Agent 编排、指标结果继续追问。"
 
 WEAK_NOTE = "\n\n（当前检索资料覆盖有限，细节口径建议联系刘城本人确认）"
+
+
+def _clean_line(line: str) -> str:
+    line = re.sub(r"^#{1,6}\s*", "", line).strip()
+    line = re.sub(r"^[-*]\s+", "", line).strip()
+    line = re.sub(r"^\d+[.、]\s*", "", line).strip()
+    return line
+
+
+def _offline_answer(question: str, evid: list[tuple[Chunk, float, float]], weak: bool = False) -> str:
+    if not evid:
+        return FALLBACK
+
+    points: list[str] = []
+    for c, _, _ in evid[:3]:
+        lines = [_clean_line(x) for x in c.text.splitlines()]
+        lines = [
+            x for x in lines
+            if x and not x.startswith("|") and set(x) != {"-"} and "引用来源" not in x
+        ]
+        if not lines:
+            continue
+        text = "；".join(lines[:3])
+        text = re.sub(r"\s+", " ", text)
+        if len(text) > 180:
+            text = text[:180].rstrip() + "..."
+        points.append(text)
+
+    if not points:
+        return FALLBACK
+
+    answer = "结合现有简历材料，刘城可以这样回答：\n" + "\n".join(f"- {p}" for p in points)
+    if weak:
+        answer += WEAK_NOTE
+    answer += "\n\n如果面试官继续追问到材料没有覆盖的细节，建议以刘城本人确认为准。"
+    return answer
 
 
 def _build_context(top: list[tuple[Chunk, float, float]]) -> str:
@@ -66,14 +103,19 @@ def route(query: str):
 
 
 async def chat_stream(question: str, history: list[dict]) -> AsyncGenerator[dict, None]:
-    """yield: {"type": "token"|"fallback"|"weak"|"error"|"sources", ...}"""
+    """yield: {"type": "token"|"fallback"|"weak"|"error", ...}"""
     mode, evid, reason = route(question)
     if mode == "fallback":
         # 兜底模板直返（不调用 LLM），避免在低证据场景编造经历
         for ch in FALLBACK:
             yield {"type": "token", "text": ch}
             await asyncio.sleep(0)
-        yield {"type": "sources", "items": [], "mode": "fallback", "reason": reason}
+        return
+
+    if not CFG.deepseek_api_key:
+        for ch in _offline_answer(question, evid, weak=(mode == "weak")):
+            yield {"type": "token", "text": ch}
+            await asyncio.sleep(0)
         return
 
     context = _build_context(evid)
@@ -96,16 +138,12 @@ async def chat_stream(question: str, history: list[dict]) -> AsyncGenerator[dict
             if delta:
                 yield {"type": "token", "text": delta}
     except Exception as e:  # 网络/API 故障也要优雅降级，不裸奔
-        yield {"type": "error", "text": f"服务暂时不可用（{type(e).__name__}），请稍后重试。"}
+        for ch in _offline_answer(question, evid, weak=True):
+            yield {"type": "token", "text": ch}
+            await asyncio.sleep(0)
         return
 
     if mode == "weak":
         for ch in WEAK_NOTE:
             yield {"type": "token", "text": ch}
             await asyncio.sleep(0)
-    yield {
-        "type": "sources",
-        "items": [{"file": c.file, "section": c.section} for c, _, _ in evid],
-        "mode": mode,
-        "reason": reason,
-    }
