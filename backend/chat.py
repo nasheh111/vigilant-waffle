@@ -67,10 +67,18 @@ WEAK_NOTE = "细节这块我印象里是这样，实际以我项目里的记录�
 
 def _direct_answer(question: str) -> str | None:
     q = re.sub(r"[\s，。！？,.!?、]", "", question.lower())
-    if any(k in q for k in ["哪一家公司", "哪家公司", "哪个公司", "哪一个公司", "哪里上班", "在哪上班", "在哪家公司", "任职公司", "工作单位", "就职"]):
+    asks_workplace = (
+        any(k in q for k in ["哪家上班", "哪上班", "哪里上班", "在哪上班", "在哪工作", "哪里工作", "哪家公司", "哪个公司", "哪一个公司", "在哪家公司", "工作单位", "任职公司"])
+        or (any(k in q for k in ["上班", "工作", "任职", "就职"]) and any(k in q for k in ["哪", "哪里", "什么公司", "哪个公司", "公司"]))
+    )
+    if asks_workplace:
         return "我目前在东尼电子股份有限公司任大模型应用工程师，主要做制造业场景里的 RAG、Agent 和工程化落地。我的项目重点是工业设备智能运维 RAG、质量分析报告助手，以及后面延伸的 AIGC 多 Agent 方案。"
     if any(k in q for k in ["几年经验", "多少年经验", "工作多久", "经验多久"]):
         return "我按现在的面试口径是 3 年大模型应用开发经验，主线一直围绕 RAG、Agent 和企业知识库落地。比较核心的是工业设备 RAG 从 0 到 1、自研 LangGraph 流程、检索优化和 FastAPI/Docker 工程化部署。"
+    if any(k in q for k in ["联系方式", "电话", "手机号", "怎么联系", "联系你", "联系刘城"]):
+        return "可以直接联系我本人，电话是 15330535227。项目细节、经历核实或者面试后续沟通，都可以通过这个号码找我确认。"
+    if any(k in q for k in ["学校", "毕业院校", "哪个大学", "什么专业", "专业是"]):
+        return "我毕业于重庆航天职业技术学院，专业是汽车电子。后面主要是自己系统补大模型应用开发这条线，包括 RAG、Agent、文档解析、模型部署和工程化落地。"
     return None
 
 
@@ -84,6 +92,26 @@ def _semantic_offline_answer(question: str, weak: bool = False) -> str:
         return _fit_spoken_answer(
             "面试官您好，我是刘城，主要做 RAG 和 Agent 方向的大模型应用开发。我的经历比较偏落地，不是只调接口，核心做过工业设备运维 RAG、质量分析报告助手，也做过 AIGC 多 Agent 方案。我的强项是把业务文档、检索、模型生成和后端服务串起来，最后能上线给业务人员真正用起来。",
             520,
+        )
+    if _has_any(q, ("职业规划", "未来规划", "发展规划", "规划", "职业目标")):
+        return _fit_spoken_answer(
+            "我的职业规划还是沿着 RAG 和 Agent 这条线往深做。短期我想把检索评测、LangGraph 编排、工具调用和本地模型部署做得更扎实，能独立负责一个业务场景从需求到上线。再往后，我希望积累项目管理和跨团队协作经验，带 3 到 5 人的小团队，把企业知识库和智能体真正落到生产流程里。",
+            620,
+        )
+    if _has_any(q, ("优势", "强项", "擅长", "优点", "亮点", "核心能力")):
+        return _fit_spoken_answer(
+            "我的优势是比较偏落地，能把业务问题拆成工程链路，而不是只会调模型接口。比如工业设备 RAG 里，我会先梳理文档和字段，再设计混合检索、精排、证据校验和兜底，最后用 FastAPI、Docker、缓存和监控把服务跑起来。简单说，我比较擅长把 RAG、Agent 和后端工程合在一起交付。",
+            650,
+        )
+    if _has_any(q, ("缺点", "短板", "不擅长", "弱点", "不足")):
+        return _fit_spoken_answer(
+            "我的短板是大模型底层训练和分布式训练这块不是主线，我更多做的是应用层落地，比如 RAG、Agent、微调适配和部署服务。如果岗位需要更底层的训练框架，我会先补官方文档和成熟工程案例，再用小实验把流程跑通，避免只停留在概念上。",
+            580,
+        )
+    if _has_any(q, ("做过哪些项目", "项目经历", "核心项目", "代表项目", "有什么项目")):
+        return _fit_spoken_answer(
+            "我主要有几条项目线。第一是工业设备智能运维 RAG，把设备手册、故障码和维修记录做成可检索知识库，重点做混合检索和证据校验。第二是质量分析报告助手，把 MES、QMS、PLC、SPC 和历史 8D/FMEA 结合起来做根因分析和报告初稿。第三是 AIGC 多 Agent 方向，比如视频生成和商品宣传图自动出图，核心都是把长流程拆成可控节点。",
+            700,
         )
     if _has_any(q, ("设备运维", "工业设备", "故障码", "故障代码", "维修", "停机", "rag系统", "rag 系统")):
         return _fit_spoken_answer(
@@ -320,16 +348,16 @@ async def chat_stream(question: str, history: list[dict]) -> AsyncGenerator[dict
             await asyncio.sleep(0)
         return
 
-    if mode in ("greeting", "fallback") and not CFG.deepseek_api_key:
-        # 没有模型 Key 时用模板兜底；有 Key 时交给 DeepSeek 做正常聊天。
-        reply = {"greeting": GREETING_REPLY, "fallback": FALLBACK}[mode]
+    if mode == "greeting" and not CFG.deepseek_api_key:
+        # 没有模型 Key 时用模板寒暄；有 Key 时交给 DeepSeek 做正常聊天。
+        reply = GREETING_REPLY
         for ch in reply:
             yield {"type": "token", "text": ch}
             await asyncio.sleep(0)
         return
 
     if not CFG.deepseek_api_key:
-        for ch in _offline_answer(question, evid, weak=(mode == "weak")):
+        for ch in _offline_answer(question, evid, weak=(mode in ("weak", "fallback"))):
             yield {"type": "token", "text": ch}
             await asyncio.sleep(0)
         return

@@ -44,8 +44,8 @@ class Config:
     kb_dir = ROOT / "data" / "kb"
     l0_weight = 1.3                # L0(简历) 权重高于 L1(话术)，口径冲突时以 L0 为准的检索侧实现
     # 演示模式匹配阈值（MVP 启发式；M3 用测试集校准）
-    hit_strong = 0.12              # 召回率 >= 此值：正常生成
-    hit_weak = 0.05                # 之间：生成但附"依据有限"提示
+    hit_strong = 0.10              # 召回率 >= 此值：正常生成
+    hit_weak = 0.03                # 之间：生成但附"依据有限"提示
     # 简历未正面展开的高风险主题，即使命中也走边界兜底
     deny_intents = [
         "前端", "vue", "react", "小程序", "java", "c++", "go语言", "android", "ios", "flutter",
