@@ -4,6 +4,7 @@
 Uses DATABASE_URL/Postgres when configured, otherwise falls back to local SQLite.
 """
 import sqlite3
+import logging
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +17,7 @@ except ImportError:  # 兼容在 backend 目录内直接运行脚本
     from config import CFG
 
 SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
+LOG = logging.getLogger(__name__)
 
 
 def _use_postgres() -> bool:
@@ -23,7 +25,15 @@ def _use_postgres() -> bool:
 
 
 def store_backend() -> str:
-    return "postgres" if _use_postgres() else "sqlite"
+    if not _use_postgres():
+        return "sqlite"
+    try:
+        with _postgres_connect() as conn:
+            conn.execute("SELECT 1")
+        return "postgres"
+    except Exception as exc:
+        LOG.warning("Postgres storage is unavailable, using SQLite fallback: %s", exc)
+        return "sqlite_fallback"
 
 
 def _beijing_now() -> str:
@@ -117,7 +127,7 @@ def _postgres_connect() -> Iterator[object]:
     except ImportError as exc:
         raise RuntimeError("DATABASE_URL 已配置，但缺少 psycopg 依赖，请确认 requirements.txt 已安装。") from exc
 
-    with psycopg.connect(CFG.database_url, row_factory=dict_row) as conn:
+    with psycopg.connect(CFG.database_url, row_factory=dict_row, connect_timeout=8) as conn:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS questions (
@@ -135,37 +145,70 @@ def _postgres_connect() -> Iterator[object]:
         yield conn
 
 
-def save_question(question: str, ip: str | None, user_agent: str | None) -> int | None:
-    text = question.strip()
-    if not text:
-        return None
-    if _use_postgres():
-        with _postgres_connect() as conn:
-            row = conn.execute(
-                """
-                INSERT INTO questions(question, ip, user_agent, created_at)
-                VALUES (%s, %s, %s, %s)
-                RETURNING id
-                """,
-                (text, ip or "", user_agent or "", _beijing_now()),
-            ).fetchone()
-            conn.commit()
-            return int(row["id"]) if row else None
-
+def _save_question_sqlite(text: str, ip: str | None, user_agent: str | None) -> dict | None:
     with _sqlite_connect() as conn:
         cur = conn.execute(
             "INSERT INTO questions(question, ip, user_agent, created_at) VALUES (?, ?, ?, ?)",
             (text, ip or "", user_agent or "", _beijing_now()),
         )
         conn.commit()
-        return int(cur.lastrowid)
+        return {"backend": "sqlite", "id": int(cur.lastrowid)}
 
 
-def save_answer(question_id: int | None, answer: str) -> None:
+def _save_question_postgres(text: str, ip: str | None, user_agent: str | None) -> dict | None:
+    with _postgres_connect() as conn:
+        row = conn.execute(
+            """
+            INSERT INTO questions(question, ip, user_agent, created_at)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id
+            """,
+            (text, ip or "", user_agent or "", _beijing_now()),
+        ).fetchone()
+        conn.commit()
+        return {"backend": "postgres", "id": int(row["id"])} if row else None
+
+
+def save_question(question: str, ip: str | None, user_agent: str | None) -> dict | None:
+    text = question.strip()
+    if not text:
+        return None
+    if _use_postgres():
+        try:
+            return _save_question_postgres(text, ip, user_agent)
+        except Exception as exc:
+            LOG.warning("Failed to save question to Postgres, falling back to SQLite: %s", exc)
+            ref = _save_question_sqlite(text, ip, user_agent)
+            if ref:
+                ref["backend"] = "sqlite_fallback"
+            return ref
+    return _save_question_sqlite(text, ip, user_agent)
+
+
+def _question_ref_id(question_ref: object) -> int | None:
+    if isinstance(question_ref, dict):
+        value = question_ref.get("id")
+    else:
+        value = question_ref
+    try:
+        return int(value) if value else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _question_ref_backend(question_ref: object) -> str:
+    if isinstance(question_ref, dict):
+        return str(question_ref.get("backend") or "")
+    return "postgres" if _use_postgres() else "sqlite"
+
+
+def save_answer(question_ref: object, answer: str) -> None:
+    question_id = _question_ref_id(question_ref)
     if not question_id:
         return
     text = answer.strip()
-    if _use_postgres():
+    backend = _question_ref_backend(question_ref)
+    if backend == "postgres":
         with _postgres_connect() as conn:
             conn.execute(
                 "UPDATE questions SET answer = %s, answered_at = %s WHERE id = %s",
@@ -184,17 +227,20 @@ def save_answer(question_id: int | None, answer: str) -> None:
 
 def list_questions(limit: int = 300) -> list[dict]:
     if _use_postgres():
-        with _postgres_connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT id, question, answer, ip, user_agent, created_at, answered_at
-                FROM questions
-                ORDER BY created_at DESC, id DESC
-                LIMIT %s
-                """,
-                (limit,),
-            ).fetchall()
-        return [_normalize_row(dict(row)) for row in rows]
+        try:
+            with _postgres_connect() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT id, question, answer, ip, user_agent, created_at, answered_at
+                    FROM questions
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                ).fetchall()
+            return [_normalize_row(dict(row)) for row in rows]
+        except Exception as exc:
+            LOG.warning("Failed to list questions from Postgres, falling back to SQLite: %s", exc)
 
     with _sqlite_connect() as conn:
         rows = conn.execute(
@@ -211,9 +257,12 @@ def list_questions(limit: int = 300) -> list[dict]:
 
 def count_questions() -> int:
     if _use_postgres():
-        with _postgres_connect() as conn:
-            row = conn.execute("SELECT COUNT(*) AS n FROM questions").fetchone()
-        return int(row["n"])
+        try:
+            with _postgres_connect() as conn:
+                row = conn.execute("SELECT COUNT(*) AS n FROM questions").fetchone()
+            return int(row["n"])
+        except Exception as exc:
+            LOG.warning("Failed to count questions from Postgres, falling back to SQLite: %s", exc)
 
     with _sqlite_connect() as conn:
         row = conn.execute("SELECT COUNT(*) AS n FROM questions").fetchone()

@@ -6,6 +6,7 @@ CV-Agent 服务入口（FastAPI + SSE）
 """
 import json
 import hmac
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
@@ -25,6 +26,7 @@ except ImportError:  # 兼容在 backend 目录内直接运行脚本
 
 ROOT = Path(__file__).resolve().parent.parent
 app = FastAPI(title="CV-Agent 简历智能问答", version="0.1.0")
+LOG = logging.getLogger(__name__)
 
 
 class ChatBody(BaseModel):
@@ -43,7 +45,7 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "kb_chunks": len(CHUNKS)}
+    return {"ok": True, "kb_chunks": len(CHUNKS), "storage": store_backend()}
 
 
 @app.post("/api/chat")
@@ -51,15 +53,15 @@ async def chat(body: ChatBody, request: Request):
     question = body.question.strip()
     if not question:
         return StreamingResponse(iter([_ev({"type": "error", "text": "问题为空。"})]), media_type="text/event-stream")
-    question_id = None
+    question_ref = None
     try:
-        question_id = save_question(
+        question_ref = save_question(
             question,
             request.client.host if request.client else "",
             request.headers.get("user-agent", ""),
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        LOG.exception("Failed to save incoming question: %s", exc)
 
     async def gen():
         answer_parts = []
@@ -70,9 +72,9 @@ async def chat(body: ChatBody, request: Request):
                 yield _ev(item)
         finally:
             try:
-                save_answer(question_id, "".join(answer_parts))
-            except Exception:
-                pass
+                save_answer(question_ref, "".join(answer_parts))
+            except Exception as exc:
+                LOG.exception("Failed to save model answer: %s", exc)
 
     return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
@@ -141,7 +143,7 @@ async function loadQuestions(){{
     if(!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
     totalEl.textContent = data.total;
-    storageEl.textContent = data.storage === 'postgres' ? '云数据库 Postgres（持久）' : '本地 SQLite（免费服务重启可能丢记录）';
+    storageEl.textContent = data.storage === 'postgres' ? '云数据库 Postgres（持久）' : (data.storage === 'sqlite_fallback' ? '云数据库异常，已临时落到本地 SQLite' : '本地 SQLite（免费服务重启可能丢记录）');
     renderRows(data.items || []);
     statusEl.textContent = '已自动更新：' + data.server_time + '，每 3 秒刷新一次';
   }} catch(e) {{
