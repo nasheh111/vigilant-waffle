@@ -22,8 +22,8 @@ SYSTEM_PROMPT = """你是正在参加大模型应用开发工程师面试的刘�
 
 回答硬性规则：
 1. 完全口语化，用第一人称“我”回答，像真实面试口述，不要写成论文，不要 markdown、标题、项目符号或引用来源。
-2. 单次回答控制在 80 到 260 个中文字符左右；复杂问题可以按自然口语分层讲，但仍然保持紧凑，并且必须完整收尾。
-3. 优先讲我做了什么、遇到什么问题、怎么解决、拿到什么效果，少堆砌名词。
+2. 单次回答一般控制在 260 到 700 个中文字符左右；简单问题可以短一点，项目类问题要结合文档展开，并且必须完整收尾。
+3. 优先讲我做了什么、遇到什么问题、怎么解决、拿到什么效果，少堆砌名词，但要保留文档里的关键技术和指标。
 4. 面试官问项目时，按业务背景、我负责的模块、难点和解决方案、最终收益这个顺序讲。
 5. 证据没有覆盖的内容不要瞎编，如实说明接触程度，并补一句自己的学习或验证思路。
 6. 面试官追问时顺着问题继续深挖，不主动抛出新问题。
@@ -42,10 +42,15 @@ def _clean_line(line: str) -> str:
     line = re.sub(r"^#{1,6}\s*", "", line).strip()
     line = re.sub(r"^[-*]\s+", "", line).strip()
     line = re.sub(r"^\d+[.、]\s*", "", line).strip()
+    line = re.sub(
+        r"^(项目背景|个人职责|技术成果|业务成果|技术方案|项目成果|个人背景|核心项目口径|技术栈口径|能力边界口径|回答口径|知识结构化体系设计与抽取链路开发|RAG 检索全链路优化与效果调优|系统工程化落地与稳定性保障|质量数据结构设计与多源数据接入|质量问题诊断 Agent|质量报告自动生成 Agent)[：:]\s*",
+        "",
+        line,
+    )
     return line
 
 
-def _fit_spoken_answer(text: str, limit: int = 220) -> str:
+def _fit_spoken_answer(text: str, limit: int = 700) -> str:
     text = re.sub(r"\s+", " ", text).strip()
     text = text.replace("**", "").replace("#", "").replace("……", "。").replace("...", "。")
     if len(text) <= limit:
@@ -53,7 +58,7 @@ def _fit_spoken_answer(text: str, limit: int = 220) -> str:
     cut = text[:limit]
     for sep in "。！？；":
         pos = cut.rfind(sep)
-        if pos >= 80:
+        if pos >= 120:
             return _ensure_complete_sentence(cut[: pos + 1])
     return _ensure_complete_sentence(cut.rsplit("，", 1)[0])
 
@@ -66,36 +71,84 @@ def _ensure_complete_sentence(text: str) -> str:
     return text if text[-1] in "。！？" else text + "。"
 
 
+def _sentences(text: str) -> list[str]:
+    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
+    text = re.sub(r"[`*_>#]", "", text)
+    text = re.sub(r"\s+", " ", text)
+    parts = re.split(r"(?<=[。！？；])", text)
+    out = []
+    for p in parts:
+        p = _clean_line(p)
+        p = p.strip(" -|")
+        if not p or len(p) < 12:
+            continue
+        if any(x in p for x in ["引用来源", "面试口径补充", "校A", "校B", "校C", "校D", "校E", "校F", "校G"]):
+            continue
+        out.append(p)
+    return out
+
+
+def _pick_sentence(sentences: list[str], keywords: tuple[str, ...], used: set[str]) -> str:
+    for s in sentences:
+        if s in used:
+            continue
+        if any(k in s for k in keywords):
+            used.add(s)
+            return s
+    for s in sentences:
+        if s not in used:
+            used.add(s)
+            return s
+    return ""
+
+
 def _offline_answer(question: str, evid: list[tuple[Chunk, float, float]], weak: bool = False) -> str:
     if not evid:
         return FALLBACK
 
-    points: list[str] = []
-    for c, _, _ in evid[:3]:
+    all_sentences: list[str] = []
+    for c, _, _ in evid[:5]:
         raw_lines = [
             x for x in c.text.splitlines()
             if not x.lstrip().startswith(("#", ">", "|"))
         ]
-        lines = [_clean_line(x) for x in raw_lines]
-        lines = [
-            x for x in lines
-            if x and set(x) != {"-"} and "引用来源" not in x and "面试口径补充" not in x
-        ]
-        if not lines:
-            continue
-        text = "；".join(lines[:3])
-        text = re.sub(r"\s+", " ", text)
-        if len(text) > 180:
-            text = _fit_spoken_answer(text, 180)
-        points.append(text)
+        all_sentences.extend(_sentences("。".join(raw_lines)))
 
-    if not points:
+    if not all_sentences:
         return FALLBACK
 
-    answer = "这个问题我会结合项目来讲。我的主要工作是" + "；".join(points[:2])
+    used: set[str] = set()
+    is_intro = any(k in question for k in ["介绍", "自我介绍", "你是谁", "经历", "背景"])
+    if is_intro:
+        first = _pick_sentence(all_sentences, ("2 年", "近2年", "大模型应用", "NLP", "专注"), used)
+        second = _pick_sentence(all_sentences, ("工业设备", "RAG", "质量", "AIGC", "Agent"), used)
+        third = _pick_sentence(all_sentences, ("LangChain", "LangGraph", "FastAPI", "Docker", "PostgreSQL", "vLLM"), used)
+        answer = "面试官您好，我是刘城。" + " ".join(x for x in [first, second, third] if x)
+    else:
+        background = _pick_sentence(all_sentences, ("背景", "面向", "场景", "问题", "痛点", "传统流程"), used)
+        responsibility = _pick_sentence(all_sentences, ("我负责", "负责", "主导", "参与", "设计", "搭建", "开发"), used)
+        challenge = _pick_sentence(all_sentences, ("难点", "问题", "不足", "不准", "分散", "复杂", "低", "慢"), used)
+        solution = _pick_sentence(all_sentences, ("使用", "基于", "通过", "采用", "接入", "封装", "编排", "检索", "精排"), used)
+        result = _pick_sentence(all_sentences, ("提升", "降低", "缩短", "达到", "达", "完成", "成果", "收益", "稳定运行"), used)
+        answer = (
+            "这个项目我会按实际落地来讲。"
+            + (f"业务背景是{background} " if background else "")
+            + (f"我主要负责{responsibility} " if responsibility else "")
+            + (f"难点在于{challenge} " if challenge else "")
+            + (f"解决上我做的是{solution} " if solution else "")
+            + (f"最后效果是{result}" if result else "")
+        )
     if weak:
         answer += "。" + WEAK_NOTE
-    return _fit_spoken_answer(answer, 260)
+    answer = (
+        answer.replace("业务背景是这是一个", "这个项目是")
+        .replace("我主要负责主导", "我主要负责")
+        .replace("我主要负责负责", "我主要负责")
+        .replace("我主要负责我在项目里重点负责", "我在项目里重点负责")
+        .replace("难点在于主导针对", "难点在于针对")
+        .replace("解决上我做的是项目基于", "解决上我基于")
+    )
+    return _fit_spoken_answer(answer, 760)
 
 
 def _build_context(top: list[tuple[Chunk, float, float]]) -> str:
@@ -161,14 +214,14 @@ async def chat_stream(question: str, history: list[dict]) -> AsyncGenerator[dict
             messages=msgs,
             stream=True,
             temperature=0.3,
-            max_tokens=500,
+            max_tokens=1200,
         )
         chunks: list[str] = []
         async for part in stream:
             delta = part.choices[0].delta.content if part.choices else None
             if delta:
                 chunks.append(delta)
-        answer = _fit_spoken_answer("".join(chunks), 280)
+        answer = _fit_spoken_answer("".join(chunks), 760)
         for ch in answer:
             yield {"type": "token", "text": ch}
             await asyncio.sleep(0)
