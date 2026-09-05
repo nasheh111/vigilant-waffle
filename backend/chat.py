@@ -67,6 +67,8 @@ WEAK_NOTE = "细节这块我印象里是这样，实际以我项目里的记录�
 
 def _direct_answer(question: str) -> str | None:
     q = re.sub(r"[\s，。！？,.!?、]", "", question.lower())
+    if any(k in q for k in ["自我介绍", "介绍一下你自己", "简单介绍下刘城", "刘城是谁", "你是谁"]):
+        return "面试官您好，我是刘城，做 RAG 和 Agent 方向的大模型应用工程师，有 3 年 NLP 与大模型应用开发经验。我主要做过工业设备智能运维 RAG、质量分析报告助手，还有 AIGC 多 Agent 方案。我的优势是比较偏落地，能把文档解析、检索、模型生成和 FastAPI/Docker 部署串成完整系统。"
     asks_workplace = (
         any(k in q for k in ["哪家上班", "哪上班", "哪里上班", "在哪上班", "在哪工作", "哪里工作", "哪家公司", "哪个公司", "哪一个公司", "在哪家公司", "工作单位", "任职公司"])
         or (any(k in q for k in ["上班", "工作", "任职", "就职"]) and any(k in q for k in ["哪", "哪里", "什么公司", "哪个公司", "公司"]))
@@ -77,8 +79,14 @@ def _direct_answer(question: str) -> str | None:
         return "我按现在的面试口径是 3 年大模型应用开发经验，主线一直围绕 RAG、Agent 和企业知识库落地。比较核心的是工业设备 RAG 从 0 到 1、自研 LangGraph 流程、检索优化和 FastAPI/Docker 工程化部署。"
     if any(k in q for k in ["联系方式", "电话", "手机号", "怎么联系", "联系你", "联系刘城"]):
         return "可以直接联系我本人，电话是 15330535227。项目细节、经历核实或者面试后续沟通，都可以通过这个号码找我确认。"
-    if any(k in q for k in ["学校", "毕业院校", "哪个大学", "什么专业", "专业是"]):
+    if any(k in q for k in ["学校", "学历", "毕业院校", "哪个大学", "什么专业", "专业是"]):
         return "我毕业于重庆航天职业技术学院，专业是汽车电子。后面主要是自己系统补大模型应用开发这条线，包括 RAG、Agent、文档解析、模型部署和工程化落地。"
+    if any(k in q for k in ["求职方向", "应聘岗位", "岗位方向", "找什么工作"]):
+        return "我现在主要看大模型应用工程师方向，重点是 RAG、Agent、企业知识库、模型服务部署和制造业场景落地。岗位如果偏应用开发和业务交付，我匹配度会更高。"
+    if any(k in q for k in ["mcp", "a2a"]):
+        return "MCP 和 A2A 我现在属于理解和跟进阶段，不会把它包装成已经深度落地过的项目经验。我会先从官方协议、工具调用边界和安全鉴权看起，再做一个小 demo，把 Agent 接工具、接外部上下文这条链路跑通。"
+    if any(k in q for k in ["做过微调", "微调经验", "lora", "qlora"]):
+        return "微调我做过应用侧适配，主要是 Qwen2、Llama2、ChatGLM 这类模型的 LoRA 或 QLoRA，用来对齐垂直领域话术和任务格式。我不会说自己是训练算法专家，我更熟的是数据准备、训练参数、量化部署和上线效果验证这条应用链路。"
     return None
 
 
@@ -254,7 +262,7 @@ def _offline_answer(question: str, evid: list[tuple[Chunk, float, float]], weak:
     used: set[str] = set()
     is_intro = any(k in question for k in ["介绍", "自我介绍", "你是谁", "经历", "背景"])
     if is_intro:
-        first = _pick_sentence(all_sentences, ("2 年", "近2年", "大模型应用", "NLP", "专注"), used)
+        first = _pick_sentence(all_sentences, ("3 年", "大模型应用", "NLP", "专注"), used)
         second = _pick_sentence(all_sentences, ("工业设备", "RAG", "质量", "AIGC", "Agent"), used)
         third = _pick_sentence(all_sentences, ("LangChain", "LangGraph", "FastAPI", "Docker", "PostgreSQL", "vLLM"), used)
         answer = "面试官您好，我是刘城。" + " ".join(x for x in [first, second, third] if x)
@@ -321,7 +329,7 @@ def route(query: str):
         return "greeting", [], "寒暄/身份确认"
     if _denied(query):
         return "denied", [], "命中简历未重点展开的个人/技能主题"
-    top = [x for x in retrieve(query) if x[0].level != "META"]
+    top = [x for x in retrieve(query) if x[0].level not in {"META", "L3"}]
     if not top:
         return "fallback", [], "无任何召回"
     best = top[0][2]
@@ -330,6 +338,27 @@ def route(query: str):
     if best < CFG.hit_strong:
         return "weak", top[: CFG.max_ctx_blocks], f"召回率 {best:.2f} ∈ [弱, 强)"
     return "strong", top[: CFG.max_ctx_blocks], f"召回率 {best:.2f}"
+
+
+def answer_diagnostics(question: str) -> dict:
+    direct = _direct_answer(question)
+    if direct:
+        return {"mode": "direct", "reason": "事实题或边界题直答", "sources": []}
+    mode, evid, reason = route(question)
+    return {
+        "mode": mode,
+        "reason": reason,
+        "sources": [
+            {
+                "file": c.file,
+                "section": c.section,
+                "level": c.level,
+                "score": round(score, 3),
+                "recall": round(recall, 3),
+            }
+            for c, score, recall in evid
+        ],
+    }
 
 
 async def chat_stream(question: str, history: list[dict]) -> AsyncGenerator[dict, None]:

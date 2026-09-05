@@ -5,6 +5,7 @@ Uses DATABASE_URL/Postgres when configured, otherwise falls back to local SQLite
 """
 import sqlite3
 import logging
+import json
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -61,6 +62,9 @@ def _normalize_row(row: dict) -> dict:
         "id": row.get("id"),
         "question": row.get("question") or "",
         "answer": row.get("answer") or "",
+        "route_mode": row.get("route_mode") or "",
+        "route_reason": row.get("route_reason") or "",
+        "sources": row.get("sources") or "",
         "ip": row.get("ip") or "",
         "user_agent": row.get("user_agent") or "",
         "created_at": _format_beijing(row.get("created_at")),
@@ -79,6 +83,9 @@ def _sqlite_connect() -> sqlite3.Connection:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             question TEXT NOT NULL,
             answer TEXT,
+            route_mode TEXT,
+            route_reason TEXT,
+            sources TEXT,
             ip TEXT,
             user_agent TEXT,
             created_at TEXT NOT NULL,
@@ -98,6 +105,12 @@ def _sqlite_ensure_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE questions ADD COLUMN answer TEXT")
     if "answered_at" not in cols:
         conn.execute("ALTER TABLE questions ADD COLUMN answered_at TEXT")
+    if "route_mode" not in cols:
+        conn.execute("ALTER TABLE questions ADD COLUMN route_mode TEXT")
+    if "route_reason" not in cols:
+        conn.execute("ALTER TABLE questions ADD COLUMN route_reason TEXT")
+    if "sources" not in cols:
+        conn.execute("ALTER TABLE questions ADD COLUMN sources TEXT")
     conn.commit()
 
 
@@ -134,6 +147,9 @@ def _postgres_connect() -> Iterator[object]:
                 id BIGSERIAL PRIMARY KEY,
                 question TEXT NOT NULL,
                 answer TEXT,
+                route_mode TEXT,
+                route_reason TEXT,
+                sources TEXT,
                 ip TEXT,
                 user_agent TEXT,
                 created_at TEXT NOT NULL,
@@ -142,47 +158,70 @@ def _postgres_connect() -> Iterator[object]:
             """
         )
         conn.commit()
+        _postgres_ensure_columns(conn)
         yield conn
 
 
-def _save_question_sqlite(text: str, ip: str | None, user_agent: str | None) -> dict | None:
+def _postgres_ensure_columns(conn: object) -> None:
+    conn.execute("ALTER TABLE questions ADD COLUMN IF NOT EXISTS route_mode TEXT")
+    conn.execute("ALTER TABLE questions ADD COLUMN IF NOT EXISTS route_reason TEXT")
+    conn.execute("ALTER TABLE questions ADD COLUMN IF NOT EXISTS sources TEXT")
+    conn.commit()
+
+
+def _meta_values(meta: dict | None) -> tuple[str, str, str]:
+    meta = meta or {}
+    sources = meta.get("sources") or []
+    return (
+        str(meta.get("mode") or ""),
+        str(meta.get("reason") or ""),
+        json.dumps(sources, ensure_ascii=False),
+    )
+
+
+def _save_question_sqlite(text: str, ip: str | None, user_agent: str | None, meta: dict | None) -> dict | None:
+    route_mode, route_reason, sources = _meta_values(meta)
     with _sqlite_connect() as conn:
         cur = conn.execute(
-            "INSERT INTO questions(question, ip, user_agent, created_at) VALUES (?, ?, ?, ?)",
-            (text, ip or "", user_agent or "", _beijing_now()),
+            """
+            INSERT INTO questions(question, ip, user_agent, created_at, route_mode, route_reason, sources)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (text, ip or "", user_agent or "", _beijing_now(), route_mode, route_reason, sources),
         )
         conn.commit()
         return {"backend": "sqlite", "id": int(cur.lastrowid)}
 
 
-def _save_question_postgres(text: str, ip: str | None, user_agent: str | None) -> dict | None:
+def _save_question_postgres(text: str, ip: str | None, user_agent: str | None, meta: dict | None) -> dict | None:
+    route_mode, route_reason, sources = _meta_values(meta)
     with _postgres_connect() as conn:
         row = conn.execute(
             """
-            INSERT INTO questions(question, ip, user_agent, created_at)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO questions(question, ip, user_agent, created_at, route_mode, route_reason, sources)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
-            (text, ip or "", user_agent or "", _beijing_now()),
+            (text, ip or "", user_agent or "", _beijing_now(), route_mode, route_reason, sources),
         ).fetchone()
         conn.commit()
         return {"backend": "postgres", "id": int(row["id"])} if row else None
 
 
-def save_question(question: str, ip: str | None, user_agent: str | None) -> dict | None:
+def save_question(question: str, ip: str | None, user_agent: str | None, meta: dict | None = None) -> dict | None:
     text = question.strip()
     if not text:
         return None
     if _use_postgres():
         try:
-            return _save_question_postgres(text, ip, user_agent)
+            return _save_question_postgres(text, ip, user_agent, meta)
         except Exception as exc:
             LOG.warning("Failed to save question to Postgres, falling back to SQLite: %s", exc)
-            ref = _save_question_sqlite(text, ip, user_agent)
+            ref = _save_question_sqlite(text, ip, user_agent, meta)
             if ref:
                 ref["backend"] = "sqlite_fallback"
             return ref
-    return _save_question_sqlite(text, ip, user_agent)
+    return _save_question_sqlite(text, ip, user_agent, meta)
 
 
 def _question_ref_id(question_ref: object) -> int | None:
@@ -231,7 +270,7 @@ def list_questions(limit: int = 300) -> list[dict]:
             with _postgres_connect() as conn:
                 rows = conn.execute(
                     """
-                    SELECT id, question, answer, ip, user_agent, created_at, answered_at
+                    SELECT id, question, answer, route_mode, route_reason, sources, ip, user_agent, created_at, answered_at
                     FROM questions
                     ORDER BY created_at DESC, id DESC
                     LIMIT %s
@@ -245,7 +284,7 @@ def list_questions(limit: int = 300) -> list[dict]:
     with _sqlite_connect() as conn:
         rows = conn.execute(
             """
-            SELECT id, question, answer, ip, user_agent, created_at, answered_at
+            SELECT id, question, answer, route_mode, route_reason, sources, ip, user_agent, created_at, answered_at
             FROM questions
             ORDER BY created_at DESC, id DESC
             LIMIT ?

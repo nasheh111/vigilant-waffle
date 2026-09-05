@@ -30,11 +30,14 @@ class Chunk:
 def _ngrams(text: str) -> set:
     """中文按字符 bigram，英文/数字按 token 小写。"""
     out = set()
-    t = re.sub(r"[^一-鿿A-Za-z0-9_]", "", text).lower()
-    for i in range(len(t) - 1):
-        pair = t[i : i + 2]
-        if not re.fullmatch(r"[a-z0-9_]{2}", pair):
-            out.add(pair)
+    for block in re.findall(r"[一-鿿]+", text):
+        for i in range(len(block) - 1):
+            out.add(block[i : i + 2])
+    normalized = text.lower().replace("-", " ").replace("/", " ")
+    for token in re.findall(r"[a-z][a-z0-9_+#.]*|\d+(?:\.\d+)?%?", normalized):
+        clean = token.strip("._+#")
+        if len(clean) >= 2:
+            out.add(clean)
     return out
 
 
