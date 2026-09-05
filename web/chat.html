@@ -110,6 +110,7 @@ async function ask(question){
       else if (ev.type === 'error'){ buf.length=0; buf.push('⚠️ '+ev.text); agentEl.innerHTML = md(buf.join('')); }
     }
   }
+  agentEl.innerHTML = md(buf.join(''));
   history.push({role:'assistant', content: buf.join('')});
   busy = false; $send.disabled = false; $in.focus();
 }

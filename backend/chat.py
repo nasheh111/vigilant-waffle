@@ -22,7 +22,7 @@ SYSTEM_PROMPT = """你是正在参加大模型应用开发工程师面试的刘�
 
 回答硬性规则：
 1. 完全口语化，用第一人称“我”回答，像真实面试口述，不要写成论文，不要 markdown、标题、项目符号或引用来源。
-2. 单次回答控制在 80 到 220 个中文字符左右；复杂问题可以按自然口语分层讲，但仍然保持紧凑。
+2. 单次回答控制在 80 到 260 个中文字符左右；复杂问题可以按自然口语分层讲，但仍然保持紧凑，并且必须完整收尾。
 3. 优先讲我做了什么、遇到什么问题、怎么解决、拿到什么效果，少堆砌名词。
 4. 面试官问项目时，按业务背景、我负责的模块、难点和解决方案、最终收益这个顺序讲。
 5. 证据没有覆盖的内容不要瞎编，如实说明接触程度，并补一句自己的学习或验证思路。
@@ -47,10 +47,23 @@ def _clean_line(line: str) -> str:
 
 def _fit_spoken_answer(text: str, limit: int = 220) -> str:
     text = re.sub(r"\s+", " ", text).strip()
-    text = text.replace("**", "").replace("#", "")
+    text = text.replace("**", "").replace("#", "").replace("……", "。").replace("...", "。")
     if len(text) <= limit:
-        return text
-    return text[:limit].rsplit("，", 1)[0].rstrip("，。； ") + "。"
+        return _ensure_complete_sentence(text)
+    cut = text[:limit]
+    for sep in "。！？；":
+        pos = cut.rfind(sep)
+        if pos >= 80:
+            return _ensure_complete_sentence(cut[: pos + 1])
+    return _ensure_complete_sentence(cut.rsplit("，", 1)[0])
+
+
+def _ensure_complete_sentence(text: str) -> str:
+    text = text.strip().rstrip("，、；：,. ")
+    text = re.sub(r"(我能够|我可以|我会|主要是|包括|比如|例如)[。！？]?$", "", text).strip().rstrip("，、；：,. ")
+    if not text:
+        return FALLBACK
+    return text if text[-1] in "。！？" else text + "。"
 
 
 def _offline_answer(question: str, evid: list[tuple[Chunk, float, float]], weak: bool = False) -> str:
@@ -73,7 +86,7 @@ def _offline_answer(question: str, evid: list[tuple[Chunk, float, float]], weak:
         text = "；".join(lines[:3])
         text = re.sub(r"\s+", " ", text)
         if len(text) > 180:
-            text = text[:180].rstrip() + "..."
+            text = _fit_spoken_answer(text, 180)
         points.append(text)
 
     if not points:
@@ -82,7 +95,7 @@ def _offline_answer(question: str, evid: list[tuple[Chunk, float, float]], weak:
     answer = "这个问题我会结合项目来讲。我的主要工作是" + "；".join(points[:2])
     if weak:
         answer += "。" + WEAK_NOTE
-    return _fit_spoken_answer(answer)
+    return _fit_spoken_answer(answer, 260)
 
 
 def _build_context(top: list[tuple[Chunk, float, float]]) -> str:
@@ -148,11 +161,17 @@ async def chat_stream(question: str, history: list[dict]) -> AsyncGenerator[dict
             messages=msgs,
             stream=True,
             temperature=0.3,
+            max_tokens=500,
         )
+        chunks: list[str] = []
         async for part in stream:
             delta = part.choices[0].delta.content if part.choices else None
             if delta:
-                yield {"type": "token", "text": delta}
+                chunks.append(delta)
+        answer = _fit_spoken_answer("".join(chunks), 280)
+        for ch in answer:
+            yield {"type": "token", "text": ch}
+            await asyncio.sleep(0)
     except Exception as e:  # 网络/API 故障也要优雅降级，不裸奔
         for ch in _offline_answer(question, evid, weak=True):
             yield {"type": "token", "text": ch}
