@@ -161,7 +161,7 @@ def respond(question: str) -> tuple[str, list]:
 
 
 # ---------------------------------------------------------------- 页面
-st.title("📄 刘城 · CV-Agent")
+st.title("我是刘城，欢迎提问")
 st.caption("把简历做成知识库 —— 混合检索 / 证据校验 / 边界兜底，全部来自本人的生产方法论")
 
 with st.sidebar:
@@ -206,8 +206,7 @@ if prompt := st.chat_input("输入你的问题，例如：他做过哪几个项�
 # 首次进入给个开场引导
 if len(st.session_state.messages) == 0:
     st.info(
-        "我是刘城问答 Agent。材料覆盖不足的问题，我会给出边界口径，"
-        "并建议联系刘城确认细节。试试上方示例问题，或随便提问。"
+        "我是刘城，欢迎提问。你可以问我的项目经历、技术方案、Agent 设计、RAG 链路或面试相关问题。"
     )
 else:
     st.button(

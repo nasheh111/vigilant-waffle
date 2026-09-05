@@ -13,7 +13,9 @@
    - `DEEPSEEK_BASE_URL`: `https://api.deepseek.com/v1`
    - `DEEPSEEK_MODEL_CHAT`: `deepseek-chat`
    - `CONF_LOW_FALLBACK`: 兜底话术，可不填，代码里已有默认值
+   - `ADMIN_PASSWORD`: 管理员后台密码，用于访问 `/admin`
 5. 部署完成后，Render 会给一个公网 HTTPS 地址，例如 `https://xxx.onrender.com`。
+6. 管理员后台地址为 `https://xxx.onrender.com/admin`，普通访客不知道密码时看不到用户提问记录。
 
 ## 注意
 

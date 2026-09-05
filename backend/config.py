@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """CV-Agent 配置：解析项目根目录 .env（结构对齐 EduAgent 模板）"""
 import os
+import secrets
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -18,6 +19,9 @@ class Config:
     app_debug = _env("APP_DEBUG", "true").lower() == "true"
     app_port = int(_env("PORT", _env("APP_PORT", "8000")))
     log_level = _env("LOG_LEVEL", "INFO")
+    admin_password = _env("ADMIN_PASSWORD", "")
+    admin_session_secret = _env("ADMIN_SESSION_SECRET", secrets.token_urlsafe(32))
+    question_db_path = Path(_env("QUESTION_DB_PATH", str(ROOT / "data" / "questions.sqlite3")))
 
     # ---- DeepSeek（用户提供，直连 API）----
     deepseek_api_key = _env("DEEPSEEK_API_KEY")

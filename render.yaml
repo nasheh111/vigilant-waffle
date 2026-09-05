@@ -14,3 +14,7 @@ services:
         value: https://api.deepseek.com/v1
       - key: DEEPSEEK_MODEL_CHAT
         value: deepseek-chat
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_SESSION_SECRET
+        generateValue: true
