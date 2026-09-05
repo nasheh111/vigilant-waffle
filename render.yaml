@@ -18,3 +18,5 @@ services:
         sync: false
       - key: ADMIN_SESSION_SECRET
         generateValue: true
+      - key: DATABASE_URL
+        sync: false

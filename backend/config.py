@@ -22,6 +22,7 @@ class Config:
     admin_password = _env("ADMIN_PASSWORD", "")
     admin_session_secret = _env("ADMIN_SESSION_SECRET", secrets.token_urlsafe(32))
     question_db_path = Path(_env("QUESTION_DB_PATH", str(ROOT / "data" / "questions.sqlite3")))
+    database_url = _env("DATABASE_URL", "").strip()
 
     # ---- DeepSeek（用户提供，直连 API）----
     deepseek_api_key = _env("DEEPSEEK_API_KEY")

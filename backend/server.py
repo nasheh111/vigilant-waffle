@@ -16,12 +16,12 @@ try:
     from .config import CFG
     from .chat import chat_stream, route
     from .kb import CHUNKS
-    from .question_store import count_questions, list_questions, save_answer, save_question
+    from .question_store import count_questions, list_questions, save_answer, save_question, store_backend
 except ImportError:  # 兼容在 backend 目录内直接运行脚本
     from config import CFG
     from chat import chat_stream, route
     from kb import CHUNKS
-    from question_store import count_questions, list_questions, save_answer, save_question
+    from question_store import count_questions, list_questions, save_answer, save_question, store_backend
 
 ROOT = Path(__file__).resolve().parent.parent
 app = FastAPI(title="CV-Agent 简历智能问答", version="0.1.0")
@@ -117,13 +117,14 @@ th{{background:#f9fafb}} td:nth-child(3),td:nth-child(4){{white-space:pre-wrap;l
 .muted{{color:#6b7280;font-size:13px;line-height:1.6}} .status{{font-size:12px;color:#16a34a;margin-top:4px}}
 .empty{{text-align:center;color:#6b7280;padding:28px}} .pending{{color:#9ca3af}}
 </style></head><body><div class="wrap">
-<div class="bar"><div><h1>刘城问答 Agent 后台</h1><div class="muted">共 <span id="total">{count_questions()}</span> 条记录，时间为北京时间（Asia/Shanghai），最新提问置顶，问题和模型回复都会归档。</div><div class="status" id="status">正在读取最新记录...</div></div>
+<div class="bar"><div><h1>刘城问答 Agent 后台</h1><div class="muted">共 <span id="total">{count_questions()}</span> 条记录，时间为北京时间（Asia/Shanghai），最新提问置顶，问题和模型回复都会归档。当前存储：<span id="storage">{store_backend()}</span></div><div class="status" id="status">正在读取最新记录...</div></div>
 <form method="post" action="/admin/logout"><button>退出</button></form></div>
 <table><thead><tr><th>ID</th><th>提问时间</th><th>用户提问</th><th>模型回复</th><th>回复时间</th><th>IP</th></tr></thead><tbody id="rows"><tr><td class="empty" colspan="6">正在加载...</td></tr></tbody></table>
 <script>
 const rowsEl = document.getElementById('rows');
 const totalEl = document.getElementById('total');
 const statusEl = document.getElementById('status');
+const storageEl = document.getElementById('storage');
 function esc(s){{return String(s ?? '').replace(/[&<>"']/g, c=>({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[c]));}}
 function renderRows(items){{
   if(!items.length){{
@@ -140,6 +141,7 @@ async function loadQuestions(){{
     if(!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
     totalEl.textContent = data.total;
+    storageEl.textContent = data.storage === 'postgres' ? '云数据库 Postgres（持久）' : '本地 SQLite（免费服务重启可能丢记录）';
     renderRows(data.items || []);
     statusEl.textContent = '已自动更新：' + data.server_time + '，每 3 秒刷新一次';
   }} catch(e) {{
@@ -168,6 +170,7 @@ def admin_questions(request: Request):
                 "ok": True,
                 "timezone": "Asia/Shanghai",
                 "server_time": datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S"),
+                "storage": store_backend(),
                 "total": count_questions(),
                 "items": list_questions(),
             },
