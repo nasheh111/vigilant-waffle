@@ -6,7 +6,6 @@ CV-Agent 服务入口（FastAPI + SSE）
 """
 import json
 import hmac
-import time
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
@@ -80,6 +79,13 @@ def _is_admin(request: Request) -> bool:
     return hmac.compare_digest(request.cookies.get("cv_admin", ""), _session_token())
 
 
+def _has_admin_api_access(request: Request) -> bool:
+    header_password = request.headers.get("x-admin-password", "")
+    return _is_admin(request) or (
+        bool(CFG.admin_password) and hmac.compare_digest(header_password, CFG.admin_password)
+    )
+
+
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page(request: Request):
     if not CFG.admin_password:
@@ -87,27 +93,78 @@ def admin_page(request: Request):
     if not _is_admin(request):
         return HTMLResponse(_admin_login())
 
-    rows = list_questions()
-    items = "\n".join(
-        f"<tr><td>{r['id']}</td><td>{_esc(r['created_at'])}</td><td>{_esc(r['question'])}</td><td>{_esc(r['ip'])}</td></tr>"
-        for r in rows
-    )
     return HTMLResponse(
         f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>刘城问答 Agent 后台</title>
 <style>
 body{{font-family:system-ui,"Microsoft YaHei",sans-serif;background:#f6f7fb;color:#111827;margin:0;padding:28px}}
-.wrap{{max-width:1100px;margin:0 auto}} h1{{font-size:22px}} .bar{{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}}
-a,button{{font:inherit}} table{{width:100%;border-collapse:collapse;background:#fff;border:1px solid #e5e7eb}}
+.wrap{{max-width:1100px;margin:0 auto}} h1{{font-size:22px;margin:0 0 8px}} .bar{{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;gap:16px}}
+a,button{{font:inherit}} button{{padding:8px 12px;border:1px solid #d1d5db;background:#fff;border-radius:8px;cursor:pointer}}
+table{{width:100%;border-collapse:collapse;background:#fff;border:1px solid #e5e7eb}}
 th,td{{padding:10px;border-bottom:1px solid #e5e7eb;text-align:left;vertical-align:top;font-size:14px}}
 th{{background:#f9fafb}} td:nth-child(3){{white-space:pre-wrap;line-height:1.6}}
-.muted{{color:#6b7280;font-size:13px}}
+.muted{{color:#6b7280;font-size:13px;line-height:1.6}} .status{{font-size:12px;color:#16a34a;margin-top:4px}}
+.empty{{text-align:center;color:#6b7280;padding:28px}}
 </style></head><body><div class="wrap">
-<div class="bar"><div><h1>刘城问答 Agent 后台</h1><div class="muted">共 {count_questions()} 条用户提问</div></div>
+<div class="bar"><div><h1>刘城问答 Agent 后台</h1><div class="muted">共 <span id="total">{count_questions()}</span> 条用户提问，时间为北京时间（Asia/Shanghai），最新提问置顶。</div><div class="status" id="status">正在读取最新记录...</div></div>
 <form method="post" action="/admin/logout"><button>退出</button></form></div>
-<table><thead><tr><th>ID</th><th>时间 UTC</th><th>用户提问</th><th>IP</th></tr></thead><tbody>{items}</tbody></table>
+<table><thead><tr><th>ID</th><th>北京时间</th><th>用户提问</th><th>IP</th></tr></thead><tbody id="rows"><tr><td class="empty" colspan="4">正在加载...</td></tr></tbody></table>
+<script>
+const rowsEl = document.getElementById('rows');
+const totalEl = document.getElementById('total');
+const statusEl = document.getElementById('status');
+function esc(s){{return String(s ?? '').replace(/[&<>"']/g, c=>({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[c]));}}
+function renderRows(items){{
+  if(!items.length){{
+    rowsEl.innerHTML = '<tr><td class="empty" colspan="4">还没有用户提问</td></tr>';
+    return;
+  }}
+  rowsEl.innerHTML = items.map(r =>
+    `<tr><td>${{esc(r.id)}}</td><td>${{esc(r.created_at)}}</td><td>${{esc(r.question)}}</td><td>${{esc(r.ip)}}</td></tr>`
+  ).join('');
+}}
+async function loadQuestions(){{
+  try {{
+    const r = await fetch('/admin/api/questions', {{cache:'no-store'}});
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    totalEl.textContent = data.total;
+    renderRows(data.items || []);
+    statusEl.textContent = '已自动更新：' + data.server_time + '，每 3 秒刷新一次';
+  }} catch(e) {{
+    statusEl.textContent = '自动更新失败，请确认仍处于登录状态';
+  }}
+}}
+loadQuestions();
+setInterval(loadQuestions, 3000);
+</script>
 </div></body></html>"""
+    )
+
+
+@app.get("/admin/api/questions")
+def admin_questions(request: Request):
+    if not CFG.admin_password:
+        return Response(json.dumps({"ok": False, "error": "ADMIN_PASSWORD 未配置"}, ensure_ascii=False), media_type="application/json", status_code=503)
+    if not _has_admin_api_access(request):
+        return Response(json.dumps({"ok": False, "error": "未授权"}, ensure_ascii=False), media_type="application/json", status_code=401)
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    return Response(
+        json.dumps(
+            {
+                "ok": True,
+                "timezone": "Asia/Shanghai",
+                "server_time": datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S"),
+                "total": count_questions(),
+                "items": list_questions(),
+            },
+            ensure_ascii=False,
+        ),
+        media_type="application/json",
+        headers={"Cache-Control": "no-store"},
     )
 
 
